@@ -106,16 +106,7 @@ Search for nearby places like:
 
 ## 📂 Project Structure
 
-AI-Safety-System/
-│
-├── frontend/
-│   └── index.html
-│
-├── backend/
-│   └── server.js
-│
-├── ai/
-│   └── ai_server.py
+<img width="343" height="296" alt="image" src="https://github.com/user-attachments/assets/130ad38f-e458-45d7-aa2a-c7a6f5112242" />
 
 ---
 
@@ -185,7 +176,7 @@ You can deploy easily:
 **Aswin Saran**
 AI & Data Science Enthusiast
 Full Stack Developer
-
+contact : https://www.linkedin.com/in/aswinsaravanan22/
 ---
 
 ## ⭐ Support

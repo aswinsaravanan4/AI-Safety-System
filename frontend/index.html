@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>AI Safety App</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin:0;
+  font-family:'Segoe UI', sans-serif;
+  background:url('https://images.unsplash.com/photo-1506744038136-46273834b3fb') center/cover;
+  min-height:100vh;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  padding:12px;
+}
+
+.container {
+  width:100%;
+  max-width:420px;
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(12px);
+  padding:16px;
+  border-radius:16px;
+  color:white;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+h2 { text-align:center; margin:0; }
+
+.section {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.location-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+
+.full { grid-column:1 / -1; }
+
+input {
+  width:100%;
+  padding:8px;
+  border:none;
+  border-radius:8px;
+  font-size:13px;
+}
+
+button {
+  width:100%;
+  padding:10px;
+  border:none;
+  border-radius:10px;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.primary { background:#00c6ff; }
+.sos { background:#ff4d4d; color:white; }
+
+#map {
+  height:200px;
+  border-radius:10px;
+}
+
+.places {
+  max-height:130px;
+  overflow:auto;
+  font-size:12px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>🚨 AI Safety</h2>
+
+<!-- TRACK -->
+<div class="section">
+  <button class="primary" onclick="startTracking()">📍 Start Tracking</button>
+
+  <div class="location-grid">
+    <input id="lat" placeholder="Latitude" readonly>
+    <input id="lon" placeholder="Longitude" readonly>
+    <input id="locationName" class="full" placeholder="Location" readonly>
+  </div>
+</div>
+
+<!-- MAP -->
+<div id="map"></div>
+
+<!-- AI -->
+<div class="section">
+  <button class="primary" onclick="checkRisk()">🧠 Check Risk</button>
+  <p id="risk">Risk: Not checked</p>
+</div>
+
+<!-- SEARCH -->
+<div class="section">
+  <input id="searchInput" placeholder="Search nearby">
+  <button class="primary" onclick="searchNearby()">🔍 Search Nearby</button>
+  <div class="places" id="placesList"></div>
+</div>
+
+<!-- ACTIONS -->
+<div class="section">
+  <button class="primary" onclick="shareLocation()">📡 Share</button>
+  <button class="sos" onclick="sendSOS()">🚨 SOS</button>
+</div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+let map, marker, routeLine;
+let currentLat, currentLon;
+let markers = [];
+
+// DISTANCE
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLon = (lon2-lon1) * Math.PI/180;
+
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1*Math.PI/180) *
+            Math.cos(lat2*Math.PI/180) *
+            Math.sin(dLon/2)**2;
+
+  return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))).toFixed(2);
+}
+
+// TRACK
+function startTracking() {
+  navigator.geolocation.watchPosition(pos => {
+    currentLat = pos.coords.latitude;
+    currentLon = pos.coords.longitude;
+
+    document.getElementById("lat").value = currentLat;
+    document.getElementById("lon").value = currentLon;
+
+    getLocationName(currentLat, currentLon);
+
+    if (!map) {
+      map = L.map("map").setView([currentLat, currentLon], 14);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+      marker = L.marker([currentLat, currentLon]).addTo(map);
+    } else {
+      marker.setLatLng([currentLat, currentLon]);
+      map.setView([currentLat, currentLon]);
+    }
+  });
+}
+
+// LOCATION NAME
+async function getLocationName(lat, lon) {
+  const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+  const data = await res.json();
+  document.getElementById("locationName").value = data.display_name;
+}
+
+// AI
+async function checkRisk() {
+  const res = await fetch("http://localhost:3000/risk", { method:"POST" });
+  const data = await res.json();
+  document.getElementById("risk").innerText = data.risk;
+}
+
+// SPELL CORRECTION
+async function getCorrectedQuery(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`;
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (data.length > 0) {
+    return data[0].display_name.split(",")[0].toLowerCase();
+  }
+  return query;
+}
+
+// SEARCH + AUTO ROUTE
+async function searchNearby() {
+  if (!currentLat) return alert("Start tracking first");
+
+  let query = document.getElementById("searchInput").value;
+  if (!query) return alert("Enter something");
+
+  const corrected = await getCorrectedQuery(query);
+
+  let suggestion = "";
+  if (query.toLowerCase() !== corrected) {
+    suggestion = `<p>🤖 Did you mean: <b>${corrected}</b>?</p>`;
+  }
+
+  query = corrected;
+
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  if (routeLine) map.removeLayer(routeLine);
+
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=8&viewbox=${currentLon-0.02},${currentLat+0.02},${currentLon+0.02},${currentLat-0.02}&bounded=1`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (data.length === 0) {
+    document.getElementById("placesList").innerHTML = "❌ No results found";
+    return;
+  }
+
+  let list = suggestion;
+
+  let nearest = null;
+  let minDist = Infinity;
+
+  data.forEach(place => {
+    const lat = parseFloat(place.lat);
+    const lon = parseFloat(place.lon);
+    const dist = parseFloat(getDistance(currentLat, currentLon, lat, lon));
+
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = { lat, lon };
+    }
+
+    const m = L.marker([lat, lon]).addTo(map)
+      .bindPopup(`${place.display_name}<br>${dist} km`);
+    markers.push(m);
+
+    list += `<p>📍 ${place.display_name}<br>📏 ${dist} km</p>`;
+  });
+
+  document.getElementById("placesList").innerHTML = list;
+
+  // AUTO ROUTE
+  if (nearest) {
+    drawRoute(nearest.lat, nearest.lon);
+  }
+}
+
+// DRAW ROUTE
+async function drawRoute(destLat, destLon) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${currentLon},${currentLat};${destLon},${destLat}?overview=full&geometries=geojson`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+
+  if (routeLine) map.removeLayer(routeLine);
+
+  routeLine = L.polyline(coords, { color:"blue", weight:5 }).addTo(map);
+  map.fitBounds(routeLine.getBounds());
+}
+
+// SOS
+function sendSOS() {
+  window.open(`https://wa.me/?text=HELP https://maps.google.com/?q=${currentLat},${currentLon}`);
+}
+
+// SHARE
+function shareLocation() {
+  alert(`https://maps.google.com/?q=${currentLat},${currentLon}`);
+}
+</script>
+
+</body>
+</html>

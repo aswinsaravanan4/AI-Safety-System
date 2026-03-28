@@ -174,8 +174,11 @@ You can deploy easily:
 ## 👨‍💻 Author
 
 **Aswin Saran**
+
 AI & Data Science Enthusiast
+
 Full Stack Developer
+
 contact : https://www.linkedin.com/in/aswinsaravanan22/
 ---
 
